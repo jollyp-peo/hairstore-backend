@@ -25,8 +25,8 @@ export const paystackService = {
 
   async verify(reference) {
     const res = await paystack.transaction.verify({ reference });
-    console.log("📡 [Service.verify] Checking reference:", reference);
-    console.log("📡 [Service.verify] Raw Paystack response:", JSON.stringify(res, null, 2));
+    console.log("[Service.verify] Checking reference:", reference);
+    console.log("[Service.verify] Raw Paystack response:", JSON.stringify(res, null, 2));
     return res; // { status, message, data }
   },
 

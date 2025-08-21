@@ -61,15 +61,15 @@ app.use((err, req, res, next) => {
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'OK', 
-    service: 'Flutterwave Payment Service',
+    service: 'Paystack Payment Service',
     timestamp: new Date().toISOString()
   });
 }); 
 
 //for debugg
 app.use((req, res, next) => {
-  console.log(`📡 Incoming: ${req.method} ${req.originalUrl}`);
-  console.log("🔑 Headers:", req.headers.authorization);
+  console.log(`Incoming: ${req.method} ${req.originalUrl}`);
+  console.log("Headers:", req.headers.authorization);
   next();
 });
 
@@ -84,7 +84,7 @@ app.listen(PORT, async () => {
       addr: PORT,
       authtoken: process.env.NGROK_AUTHTOKEN,
     });
-    console.log(`🚀 Ngrok tunnel: ${listener.url()}`);
+    console.log(`Ngrok tunnel: ${listener.url()}`);
 
     // Optional: update webhook URL env var dynamically
     console.log(`Webhook URL: ${listener.url()}/api/payments/webhook`);

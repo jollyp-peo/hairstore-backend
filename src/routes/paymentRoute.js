@@ -12,7 +12,7 @@ const initLimiter = rateLimit({
 });
 
 router.post('/paystack/initialize', protect, initLimiter, initializePayment);
-router.get('/paystack/verify',  verifyPayment); //add protect later
+router.get('/paystack/verify', protect,   verifyPayment); //add protect later
 
 // Webhook must NOT be behind auth
 router.post('/paystack/webhook', handleWebhook);
