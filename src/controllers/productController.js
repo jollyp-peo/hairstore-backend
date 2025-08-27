@@ -1,118 +1,218 @@
 import cloudinary from "../config/cloudinary.js";
 import { supabase } from "../config/supabaseClient.js";
+import slugify from "slugify";
 
-// Create product
+// helper to upload a file buffer to cloudinary
+const streamUpload = (fileBuffer, folder = "products") => {
+	return new Promise((resolve, reject) => {
+		const stream = cloudinary.uploader.upload_stream(
+			{ folder },
+			(error, result) => {
+				if (result) resolve(result);
+				else reject(error);
+			}
+		);
+		stream.end(fileBuffer);
+	});
+};
+
+// helper to generate a unique slug
+const generateUniqueSlug = async (name) => {
+	const baseSlug = slugify(name, { lower: true, strict: true });
+	let slug = baseSlug;
+	let counter = 1;
+
+	// keep checking if slug exists in supabase
+	while (true) {
+		const { data, error } = await supabase
+			.from("products")
+			.select("id")
+			.eq("slug", slug)
+			.maybeSingle();
+
+		if (error) throw error;
+		if (!data) break; // slug is free
+
+		slug = `${baseSlug}-${counter++}`;
+	}
+
+	return slug;
+};
+
+// CREATE PRODUCT
 export const createProduct = async (req, res) => {
-  try {
-    const { name, slug, price, original_price, category, featured, in_stock, details } = req.body;
+	try {
+		const {
+			name,
+			price,
+			original_price,
+			category,
+			featured,
+			in_stock,
+			rating,
+			reviews,
+			details,
+		} = req.body;
 
-    let imageUrl = null;
+		// auto-generate slug
+		const slug = await generateUniqueSlug(name);
 
-    // If file uploaded, send to Cloudinary
-    if (req.file) {
-      const result = await cloudinary.uploader.upload_stream(
-        { folder: "products" },
-        (error, result) => {
-          if (error) throw error;
-          return result;
-        }
-      );
+		// handle cover image
+		let imageUrl = null;
+		if (req.files?.image) {
+			const uploadResult = await streamUpload(req.files.image[0].buffer);
+			imageUrl = uploadResult.secure_url;
+		}
 
-      imageUrl = result.secure_url;
-    }
+		// handle gallery images
+		let galleryUrls = [];
+		if (req.files?.gallery) {
+			for (const file of req.files.gallery) {
+				const uploadResult = await streamUpload(file.buffer);
+				galleryUrls.push(uploadResult.secure_url);
+			}
+		}
 
-    // insert product
-    const { data: product, error } = await supabase
-      .from("products")
-      .insert([{ name, slug, price, original_price, category, featured, in_stock, image: imageUrl }])
-      .select()
-      .single();
+		// insert product
+		const { data: product, error } = await supabase
+			.from("products")
+			.insert([
+				{
+					name,
+					slug,
+					price,
+					original_price,
+					category,
+					featured,
+					in_stock,
+					rating: rating || 0,
+					reviews: reviews || 0,
+					image: imageUrl,
+				},
+			])
+			.select()
+			.single();
 
-    if (error) throw error;
+		if (error) throw error;
 
-    // insert details if provided
-    if (details) {
-      const { data: productDetail, error: detailError } = await supabase
-        .from("product_details")
-        .insert([{ product_id: product.id, ...details }])
-        .select()
-        .single();
+		// insert details if provided
+		if (details) {
+			const detailsObj =
+				typeof details === "string" ? JSON.parse(details) : details;
+			detailsObj.images = galleryUrls; // attach gallery
 
-      if (detailError) throw detailError;
-      product.details = productDetail;
-    }
+			const { data: productDetail, error: detailError } = await supabase
+				.from("product_details")
+				.insert([{ product_id: product.id, ...detailsObj }])
+				.select()
+				.single();
 
-    res.status(201).json(product);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+			if (detailError) throw detailError;
+			product.details = productDetail;
+		}
+
+		res.status(201).json(product);
+	} catch (err) {
+		console.error("Create product error:", err);
+		res.status(500).json({ error: err.message });
+	}
 };
 
-
-// Get all products
+// GET PRODUCTS 
 export const getProducts = async (req, res) => {
-  try {
-    const { data, error } = await supabase.from("products").select("*").order("created_at", { ascending: false });
-    if (error) throw error;
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+	try {
+		const { data, error } = await supabase
+			.from("products")
+			.select("*")
+			.order("created_at", { ascending: false });
+
+		if (error) throw error;
+		res.json(data);
+	} catch (err) {
+		res.status(500).json({ error: err.message });
+	}
 };
 
-// Get single product + details
+// GET PRODUCT BY ID
 export const getProductById = async (req, res) => {
-  try {
-    const { id } = req.params;
+	try {
+		const { id } = req.params;
 
-    const { data: product, error } = await supabase
-      .from("products")
-      .select("*, product_details(*)")
-      .eq("id", id)
-      .single();
+		const { data: product, error } = await supabase
+			.from("products")
+			.select("*, product_details(*)")
+			.eq("id", id)
+			.single();
 
-    if (error) throw error;
-    res.json(product);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+		if (error) throw error;
+		res.json(product);
+	} catch (err) {
+		res.status(500).json({ error: err.message });
+	}
 };
 
-// Update product
+// UPDATE PRODUCT 
 export const updateProduct = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { details, ...updates } = req.body;
+	try {
+		const { id } = req.params;
+		const { details, name, ...updates } = req.body;
 
-    const { data: updated, error } = await supabase
-      .from("products")
-      .update({ ...updates, updated_at: new Date() })
-      .eq("id", id)
-      .select()
-      .single();
+		// If name is updated, regenerate slug
+		if (name) {
+			updates.slug = await generateUniqueSlug(name);
+		}
 
-    if (error) throw error;
+		// cover image update
+		if (req.files?.image) {
+			const uploadResult = await streamUpload(req.files.image[0].buffer);
+			updates.image = uploadResult.secure_url;
+		}
 
-    if (details) {
-      await supabase
-        .from("product_details")
-        .upsert({ product_id: id, ...details, updated_at: new Date() });
-    }
+		// gallery update
+		let galleryUrls = [];
+		if (req.files?.gallery) {
+			for (const file of req.files.gallery) {
+				const uploadResult = await streamUpload(file.buffer);
+				galleryUrls.push(uploadResult.secure_url);
+			}
+		}
 
-    res.json(updated);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+		// update product
+		const { data: updated, error } = await supabase
+			.from("products")
+			.update({ ...updates, updated_at: new Date() })
+			.eq("id", id)
+			.select()
+			.single();
+
+		if (error) throw error;
+
+		// update details
+		if (details) {
+			const detailsObj =
+				typeof details === "string" ? JSON.parse(details) : details;
+			if (galleryUrls.length) detailsObj.images = galleryUrls;
+
+			await supabase
+				.from("product_details")
+				.upsert({ product_id: id, ...detailsObj, updated_at: new Date() });
+		}
+
+		res.json(updated);
+	} catch (err) {
+		console.error("Update product error:", err);
+		res.status(500).json({ error: err.message });
+	}
 };
 
-// Delete product
+// DELETE PRODUCT 
 export const deleteProduct = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { error } = await supabase.from("products").delete().eq("id", id);
-    if (error) throw error;
-    res.json({ message: "Product deleted" });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+	try {
+		const { id } = req.params;
+		const { error } = await supabase.from("products").delete().eq("id", id);
+		if (error) throw error;
+		res.json({ message: "Product deleted" });
+	} catch (err) {
+		res.status(500).json({ error: err.message });
+	}
 };

@@ -11,8 +11,8 @@ import {
 
 const router = express.Router();
 
-router.post("/", requireAdmin, upload.single("image"), createProduct);
-router.put("/:id", requireAdmin, upload.single("image"), updateProduct);
+router.post("/", requireAdmin, upload, createProduct);
+router.put("/:id", requireAdmin, upload, updateProduct);
 router.delete("/:id", requireAdmin, deleteProduct);
 
 // Public routes
