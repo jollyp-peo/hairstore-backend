@@ -12,7 +12,7 @@ export const initializePayment = async (req, res) => {
       reference,        // reference (unique)
       currency = 'NGN',
       cart,             // snapshot of cart
-      meta,             // metadata
+      meta,             // metadata 
     } = req.body;
 
     console.log('[INIT] Payment initialization request:', {

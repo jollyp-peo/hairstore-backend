@@ -1,85 +1,31 @@
-import { supabase } from '../config/supabaseClient.js';
+import jwt from "jsonwebtoken";
+import { supabase } from "../config/supabaseClient.js";
+
+const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET || "access_secret";
 
 export const protect = async (req, res, next) => {
   try {
-    const authHeader = req.headers.authorization;
-    const token = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token) return res.status(401).json({ message: "Access token required" });
 
-    if (!token) {
-      return res.status(401).json({ message: 'Access token required' });
-    }
+    const decoded = jwt.verify(token, ACCESS_TOKEN_SECRET);
 
-    const { data: { user }, error } = await supabase.auth.getUser(token);
-    
-    if (error || !user) {
-      return res.status(401).json({ message: 'Invalid token' });
-    }
+    const { data: user } = await supabase.from("users").select("*").eq("id", decoded.id).single();
 
-    // Get user data from users table (including role)
-    const { data: userData, error: dbError } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', user.id)
-      .single();
+    if (!user) return res.status(401).json({ message: "User not found" });
 
-    if (dbError || !userData) {
-      return res.status(401).json({ message: 'User not found' });
-    }
-
-    req.user = userData; // Now includes role
+    req.user = user;
     next();
-  } catch (error) {
-    console.error('Auth middleware error:', error);
-    res.status(401).json({ message: 'Authentication failed' });
+  } catch (err) {
+    res.status(401).json({ message: "Authentication failed" });
   }
 };
 
-// Admin-only middleware
-export const requireAdmin = async (req, res, next) => {
-  try {
-    // First run protect middleware
-    await new Promise((resolve, reject) => {
-      protect(req, res, (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
 
-    // Check if user has admin role
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Admin access required' });
-    }
-
-    next();
-  } catch (error) {
-    console.error('Admin middleware error:', error);
-    res.status(403).json({ message: 'Access denied' });
+//Require admin privilege
+export const requireAdmin = (req, res, next) => {
+  if (!req.user || req.user.role !== "admin") {
+    return res.status(403).json({ message: "Admin access required" });
   }
-};
-
-// Role-based middleware factory
-export const requireRole = (allowedRoles) => {
-  return async (req, res, next) => {
-    try {
-      // First run protect middleware
-      await new Promise((resolve, reject) => {
-        protect(req, res, (err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      });
-
-      // Check if user has required role
-      if (!allowedRoles.includes(req.user.role)) {
-        return res.status(403).json({ 
-          message: `Access denied. Required roles: ${allowedRoles.join(', ')}` 
-        });
-      }
-
-      next();
-    } catch (error) {
-      console.error('Role middleware error:', error);
-      res.status(403).json({ message: 'Access denied' });
-    }
-  };
+  next();
 };

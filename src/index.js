@@ -7,7 +7,10 @@ import cors from 'cors';
 import helmet from 'helmet';
 import authRoutes from './routes/authRoute.js';
 import paymentRoute from './routes/paymentRoute.js'
+import profileRoute from './routes/profileRoute.js'
+import addressRoutes from "./routes/addressRoutes.js";
 import { rawBodyBuffer } from './middleware/rawBody.js';
+import productRoutes from "./routes/productRoutes.js";
 import ngrok from '@ngrok/ngrok';
 
 
@@ -49,6 +52,10 @@ app.use(cookieParser());
 // routes
 app.use('/api/auth', authRoutes);
 app.use('/api/payments', paymentRoute);
+app.use('/api/profile', profileRoute);
+app.use("/api/addresses", addressRoutes);
+app.use("/api/products", productRoutes);
+
 
 
 // global error handler
@@ -85,9 +92,6 @@ app.listen(PORT, async () => {
       authtoken: process.env.NGROK_AUTHTOKEN,
     });
     console.log(`Ngrok tunnel: ${listener.url()}`);
-
-    // Optional: update webhook URL env var dynamically
-    console.log(`Webhook URL: ${listener.url()}/api/payments/webhook`);
   }
 });
 

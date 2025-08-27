@@ -1,316 +1,262 @@
 import { supabase } from "../config/supabaseClient.js";
+import { generateAccessToken, generateRefreshToken } from "../utilis/generateToken.js";
+import bcrypt from 'bcryptjs'
+import crypto from "crypto";
 
 // Signup
 export const signup = async (req, res) => {
-	try {
-		const { email, password, first_name, last_name, username } = req.body;
+  try {
+    const { email, password, first_name, last_name, username } = req.body;
 
-		if (!email || !password || !first_name || !last_name || !username) {
-			return res.status(400).json({ message: "All fields are required" });
-		}
+    if (!email || !password || !first_name || !last_name || !username) {
+      return res.status(400).json({ message: "All fields required" });
+    }
 
-		// Check if username already exists
-		const { data: existingUser } = await supabase
-			.from("users")
-			.select("username")
-			.eq("username", username.toLowerCase())
-			.single();
+    const normalizedEmail = email.toLowerCase().trim();
+    const normalizedUsername = username.toLowerCase().trim();
 
-		if (existingUser) {
-			return res.status(400).json({ message: "Username already taken" });
-		}
+    // Check duplicates
+    const { data: existing } = await supabase
+      .from("users")
+      .select("id,email,username")
+      .or(`email.eq.${normalizedEmail},username.eq.${normalizedUsername}`)
+      .maybeSingle();
 
-		// 1. Create in Supabase Auth
-		const { data: authData, error: authError } = await supabase.auth.signUp({
-			email,
-			password,
-		});
+    if (existing) {
+      return res.status(400).json({ message: "Email or username already exists" });
+    }
 
-		if (authError) return res.status(400).json({ message: authError.message });
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-		// 2. Create in users table with default 'user' role
-		const { error: insertError } = await supabase.from("users").insert({
-			id: authData.user.id,
-			email,
-			username: username.toLowerCase(),
-			first_name,
-			last_name,
-			role: "user", // Default role
-		});
+    const { data: user, error } = await supabase
+      .from("users")
+      .insert({
+        email: normalizedEmail,
+        username: normalizedUsername,
+        first_name,
+        last_name,
+        password: hashedPassword,
+        role: "user",
+      })
+      .select("*")
+      .single();
 
-		if (insertError) {
-			// Cleanup: Remove the auth user if database insert fails
-			await supabase.auth.admin.deleteUser(authData.user.id);
-			return res.status(400).json({ message: insertError.message });
-		}
+    if (error) return res.status(400).json({ message: error.message || "Signup failed" });
 
-		res.status(201).json({
-			message: "Signup successful",
-			user: {
-				id: authData.user.id,
-				email,
-				username,
-				first_name,
-				last_name,
-				role: "user",
-			},
-			session: authData.session,
-			token: authData.session?.access_token,
-		});
-	} catch (err) {
-		console.error("Signup error:", err);
-		res.status(500).json({ message: "Server error" });
-	}
+    const accessToken = generateAccessToken(user);
+    const refreshToken = generateRefreshToken(user);
+
+    // Save session
+    await supabase.from("user_sessions").insert({
+      user_id: user.id,
+      refresh_token: refreshToken,
+      user_agent: req.headers["user-agent"] || null,
+      ip_address: req.ip,
+      expires_at: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7), // 7 days
+    });
+
+    res.status(201).json({
+      message: "Signup successful",
+      user,
+      accessToken,
+      refreshToken,
+    });
+  } catch (err) {
+    console.error("Signup error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
 };
+
+
 
 // Login with username or email
 export const login = async (req, res) => {
-	try {
-		const { identifier, password } = req.body;
+  try {
+    const { identifier, password } = req.body;
 
-		if (!identifier || !password) {
-			return res
-				.status(400)
-				.json({
-					message: "Password and either username or email are required",
-				});
-		}
+    const { data: user } = await supabase
+      .from("users")
+      .select("*")
+      .or(`email.eq.${identifier.toLowerCase()},username.eq.${identifier.toLowerCase()}`)
+      .maybeSingle();
 
-		let userEmail = identifier;
+    if (!user) return res.status(400).json({ message: "Invalid credentials" });
 
-		// If it's a username, fetch email
-		if (!identifier.includes("@")) {
-			const { data: userRow, error: lookupError } = await supabase
-				.from("users")
-				.select("email")
-				.eq("username", identifier.toLowerCase())
-				.single();
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) return res.status(400).json({ message: "Invalid credentials" });
 
-			if (lookupError || !userRow) {
-				return res
-					.status(400)
-					.json({ message: "Invalid username or password" });
-			}
+    const accessToken = generateAccessToken(user);
+    const refreshToken = generateRefreshToken(user);
 
-			userEmail = userRow.email;
-		}
+    await supabase.from("user_sessions").insert({
+      user_id: user.id,
+      refresh_token: refreshToken,
+      user_agent: req.headers["user-agent"] || null,
+      ip_address: req.ip,
+      expires_at: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7),
+    });
 
-		// Login with Supabase Auth
-		const { data: loginData, error: loginError } =
-			await supabase.auth.signInWithPassword({
-				email: userEmail,
-				password,
-			});
-
-		if (loginError) {
-			return res.status(400).json({ message: loginError.message });
-		}
-
-		// Get user data with role from users table
-		const { data: userData, error: userError } = await supabase
-			.from("users")
-			.select("*")
-			.eq("id", loginData.user.id)
-			.single();
-
-		if (userError || !userData) {
-			return res.status(500).json({ message: "Failed to fetch user data" });
-		}
-
-		res.json({
-			message: "Login successful",
-			user: userData, // Include role and all user data
-			session: loginData.session,
-			token: loginData.session?.access_token,
-		});
-	} catch (err) {
-		console.error("Login error:", err);
-		res.status(500).json({ message: "Server error" });
-	}
+    res.json({
+      message: "Login successful",
+      user,
+      accessToken,
+      refreshToken,
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
+  }
 };
 
-// googleOAuthCallback
 
-export const googleOAuthCallback = async (req, res) => {
-	try {
-		const authHeader = req.headers.authorization || "";
-		const token = authHeader.startsWith("Bearer ")
-			? authHeader.split(" ")[1]
-			: null;
 
-		if (!token) {
-			return res.status(401).json({ message: "Missing access token" });
-		}
 
-		// Verify token and get user from Supabase Auth
-		const {
-			data: { user },
-			error,
-		} = await supabase.auth.getUser(token);
-		if (error || !user) {
-			console.error("Token verification error:", error);
-			return res.status(401).json({ message: "Invalid token" });
-		}
+// refresh token 
+export const refreshToken = async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token) return res.status(401).json({ message: "Refresh token required" });
 
-		// Check if user already exists in our users table
-		const { data: existingUser, error: fetchError } = await supabase
-			.from("users")
-			.select("*")
-			.eq("email", user.email)
-			.maybeSingle();
+    const decoded = jwt.verify(token, REFRESH_TOKEN_SECRET);
 
-		if (fetchError) {
-			console.error("Database fetch error:", fetchError);
-			return res
-				.status(500)
-				.json({ message: "Server error during user lookup" });
-		}
+    // Find session
+    const { data: session } = await supabase
+      .from("user_sessions")
+      .select("id, user_id, refresh_token, expires_at")
+      .eq("refresh_token", token)
+      .maybeSingle();
 
-		// If user doesn't exist, create them in the users table
-		if (!existingUser) {
-			// Extract and clean name from user metadata
-			const fullName = user.user_metadata?.full_name || "";
-			const nameParts = fullName.trim().split(" ");
-			const firstName = nameParts[0] || "";
-			const lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "";
+    if (!session || new Date(session.expires_at) < new Date()) {
+      return res.status(403).json({ message: "Invalid or expired session" });
+    }
 
-			// Generate unique username
-			let baseUsername =
-				user.user_metadata?.user_name ||
-				user.user_metadata?.preferred_username ||
-				user.email.split("@")[0];
+    // Get user
+    const { data: user } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", session.user_id)
+      .single();
 
-			// Clean username - remove special characters, make lowercase
-			baseUsername = baseUsername.toLowerCase().replace(/[^a-z0-9_]/g, "");
+    if (!user) return res.status(403).json({ message: "User not found" });
 
-			// Ensure username is not empty
-			if (!baseUsername) {
-				baseUsername = `user${Date.now()}`;
-			}
+    const newAccessToken = generateAccessToken(user);
+    const newRefreshToken = generateRefreshToken(user);
 
-			// Check for username uniqueness and create unique one if needed
-			let username = baseUsername;
-			let counter = 1;
-			let isUnique = false;
+    // Rotate session token
+    await supabase.from("user_sessions")
+      .update({ refresh_token: newRefreshToken, updated_at: new Date() })
+      .eq("id", session.id);
 
-			while (!isUnique) {
-				const { data: existingUsername, error: usernameCheckError } =
-					await supabase
-						.from("users")
-						.select("username")
-						.eq("username", username)
-						.maybeSingle();
-
-				if (usernameCheckError) {
-					console.error("Username check error:", usernameCheckError);
-					return res
-						.status(500)
-						.json({ message: "Error checking username availability" });
-				}
-
-				if (!existingUsername) {
-					isUnique = true;
-				} else {
-					username = `${baseUsername}${counter}`;
-					counter++;
-					// Prevent infinite loop
-					if (counter > 1000) {
-						username = `${baseUsername}${Date.now()}`;
-						break;
-					}
-				}
-			}
-
-			// Insert new user into users table with default role
-			const { error: insertError } = await supabase.from("users").insert({
-				id: user.id,
-				email: user.email,
-				username: username,
-				first_name: firstName,
-				last_name: lastName,
-				avatar_url:
-					user.user_metadata?.avatar_url || user.user_metadata?.picture || null,
-				role: "user", // Default role for Google users
-			});
-
-			if (insertError) {
-				console.error("Database insert error:", insertError);
-				return res.status(500).json({
-					message: "Failed to create user in database",
-					error: insertError.message,
-				});
-			}
-
-			console.log(
-				`New Google user created: ${user.email} with username: ${username}`
-			);
-		} else {
-			// User exists, optionally update avatar if it's changed
-			if (
-				user.user_metadata?.avatar_url &&
-				user.user_metadata.avatar_url !== existingUser.avatar_url
-			) {
-				const { error: updateError } = await supabase
-					.from("users")
-					.update({ avatar_url: user.user_metadata.avatar_url })
-					.eq("id", user.id);
-
-				if (updateError) {
-					console.error("Avatar update error:", updateError);
-					// Don't fail the request for avatar update error
-				}
-			}
-		}
-
-		// Get the complete user data to return (including role)
-		const { data: completeUser, error: finalFetchError } = await supabase
-			.from("users")
-			.select("*")
-			.eq("id", user.id)
-			.single();
-
-		if (finalFetchError) {
-			console.error("Final user fetch error:", finalFetchError);
-			return res.status(500).json({ message: "Error retrieving user data" });
-		}
-
-		// Send success response with user data including role
-		res.status(200).json({
-			message: "Google login successful",
-			user: completeUser, // Includes role field
-			token: token,
-		});
-	} catch (err) {
-		console.error("Google callback error:", err);
-		res.status(500).json({
-			message: "Server error during Google authentication",
-			error: err.message,
-		});
-	}
+    res.json({
+      accessToken: newAccessToken,
+      refreshToken: newRefreshToken,
+    });
+  } catch (err) {
+    return res.status(403).json({ message: "Invalid or expired refresh token" });
+  }
 };
 
-// Refresh token
-export const refreshAccessToken = async (req, res) => {
-	try {
-		const refresh_token = req.body.refresh_token;
-		if (!refresh_token)
-			return res.status(400).json({ message: "No refresh token provided" });
 
-		const { data, error } = await supabase.auth.refreshSession({
-			refresh_token,
-		});
+// logout (secure)
+export const logout = async (req, res) => {
+  try {
+    const refreshToken = req.body.refreshToken || req.headers["x-refresh-token"];
 
-		if (error) return res.status(400).json({ message: error.message });
+    if (!refreshToken) {
+      return res.status(400).json({ message: "Refresh token required" });
+    }
 
-		res.json({
-			message: "Token refreshed",
-			session: data.session,
-		});
-	} catch (err) {
-		console.error("Refresh token error:", err);
-		res.status(500).json({ message: "Server error" });
-	}
+    // Only delete session belonging to this logged-in user
+    await supabase
+      .from("user_sessions")
+      .delete()
+      .eq("user_id", req.user.id)
+      .eq("refresh_token", refreshToken);
+
+    res.json({ message: "Logged out successfully" });
+  } catch (err) {
+    console.error("Logout error:", err);
+    res.status(500).json({ message: "Logout failed" });
+  }
 };
+
+
+
+
+// reset password
+// Step 1: Request reset
+export const requestPasswordReset = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    const { data: user } = await supabase
+      .from("users")
+      .select("id, email")
+      .eq("email", email.toLowerCase())
+      .maybeSingle();
+
+    if (!user) {
+      return res.status(404).json({ message: "No account with this email" });
+    }
+
+    const resetToken = crypto.randomBytes(32).toString("hex");
+    const resetExpiry = new Date(Date.now() + 1000 * 60 * 15); // 15 mins
+
+    await supabase.from("users")
+      .update({ reset_token: resetToken, reset_expires: resetExpiry })
+      .eq("id", user.id);
+
+    // TODO: send email with link: `${FRONTEND_URL}/reset-password/${resetToken}`
+    console.log(`Reset link: ${process.env.FRONTEND_URL}/reset-password/${resetToken}`);
+
+    res.json({ message: "Password reset email sent" });
+  } catch (err) {
+    console.error("Reset request error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+
+// Step 2: Reset password
+export const resetPassword = async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
+
+    const { data: user } = await supabase
+      .from("users")
+      .select("*")
+      .eq("reset_token", token)
+      .maybeSingle();
+
+    if (!user) {
+      return res.status(400).json({ message: "Invalid or expired token" });
+    }
+
+    if (new Date(user.reset_expires) < new Date()) {
+      return res.status(400).json({ message: "Reset token expired" });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update password + clear reset token
+    await supabase.from("users")
+      .update({
+        password: hashedPassword,
+        reset_token: null,
+        reset_expires: null,
+      })
+      .eq("id", user.id);
+
+    // Invalidate all sessions
+    await supabase.from("user_sessions").delete().eq("user_id", user.id);
+
+    res.json({ message: "Password reset successful. All sessions cleared." });
+  } catch (err) {
+    console.error("Reset error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+
 
 export const getAllUsers = (req, res) => {
 	console.log("users");

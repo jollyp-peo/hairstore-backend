@@ -1,22 +1,28 @@
 import express from 'express';
-import { signup, login, refreshAccessToken, googleOAuthCallback, getAllUsers } from '../controllers/authController.js';
-import { protect, requireAdmin, requireRole } from '../middleware/authMiddleware.js';
+import {
+  signup,
+  login,
+  refreshToken,
+  logout,
+  requestPasswordReset,
+  resetPassword,
+  getAllUsers
+} from '../controllers/authController.js';
+import { protect, requireAdmin } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
+// Auth
 router.post('/signup', signup);
 router.post('/login', login);
-router.get('/refresh', refreshAccessToken);
+router.post('/refresh', refreshToken);   // refresh with token in body
+router.post('/logout', logout);          // expects { refreshToken } in body
 
-// Google OAuth callback endpoint
-router.post('/google/callback', googleOAuthCallback);
-
-// Protected route
-router.get('/profile', protect, (req, res) => {
-  res.json({ user: req.user });
-});
+// Password reset
+router.post('/password-reset/request', requestPasswordReset);
+router.post('/password-reset/confirm', resetPassword);
 
 // Admin only
-router.get('/admin/users', requireAdmin, getAllUsers);
+router.get('/admin/users', protect, requireAdmin, getAllUsers);
 
 export default router;
