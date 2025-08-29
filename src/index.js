@@ -33,8 +33,19 @@ app.use(helmet({
 
 
 // app.use(helmet());
+const allowedOrigins = [
+  'http://localhost:5173',
+  'https://hairbyurban.vercel.app'
+];
+
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('CORS not allowed'));
+    }
+  },
   credentials: true
 }));
 
