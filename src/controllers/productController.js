@@ -118,20 +118,77 @@ export const createProduct = async (req, res) => {
 	}
 };
 
-// GET PRODUCTS 
+// // GET PRODUCTS 
+// export const getProducts = async (req, res) => {
+// 	try {
+// 		const { data, error } = await supabase
+// 			.from("products")
+// 			.select("*")
+// 			.order("created_at", { ascending: false });
+
+// 		if (error) throw error;
+// 		res.json(data);
+// 	} catch (err) {
+// 		res.status(500).json({ error: err.message });
+// 	}
+// };
+
+
+// GET PRODUCTS (with pagination, search, filter, sort)
 export const getProducts = async (req, res) => {
 	try {
-		const { data, error } = await supabase
-			.from("products")
-			.select("*")
-			.order("created_at", { ascending: false });
+		let {
+			page = 1,
+			limit = 10,
+			search = "",
+			category = "",
+			sortBy = "created_at",
+			order = "desc", // "asc" | "desc"
+		} = req.query;
 
+		page = parseInt(page, 10);
+		limit = parseInt(limit, 10);
+		const from = (page - 1) * limit;
+		const to = from + limit - 1;
+
+		// Base query
+		let query = supabase.from("products").select("*", { count: "exact" });
+
+		// Search by name
+		if (search) {
+			query = query.ilike("name", `%${search}%`);
+		}
+
+		// Filter by category
+		if (category && category !== "all") query = query.eq("category", category);
+
+		// Sorting
+		if (sortBy) {
+			query = query.order(sortBy, { ascending: order === "asc" });
+		}
+
+		// Pagination
+		query = query.range(from, to);
+
+		// Execute
+		const { data, error, count } = await query;
 		if (error) throw error;
-		res.json(data);
+
+		res.json({
+			products: data,
+			pagination: {
+				page,
+				limit,
+				total: count,
+				totalPages: Math.ceil(count / limit),
+			},
+		});
 	} catch (err) {
+		console.error("Get products error:", err);
 		res.status(500).json({ error: err.message });
 	}
 };
+
 
 // GET PRODUCT BY ID
 export const getProductById = async (req, res) => {
