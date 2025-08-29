@@ -11,7 +11,7 @@ import profileRoute from './routes/profileRoute.js'
 import addressRoutes from "./routes/addressRoutes.js";
 import { rawBodyBuffer } from './middleware/rawBody.js';
 import productRoutes from "./routes/productRoutes.js";
-import ngrok from '@ngrok/ngrok';
+// import ngrok from '@ngrok/ngrok';
 
 
 const app = express();
@@ -86,12 +86,12 @@ app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
 
   // Start ngrok tunnel
-  if (process.env.NODE_ENV !== 'production') {
-    const listener = await ngrok.connect({
-      addr: PORT,
-      authtoken: process.env.NGROK_AUTHTOKEN,
-    });
-    console.log(`Ngrok tunnel: ${listener.url()}`);
-  }
+  // if (process.env.NODE_ENV !== 'production') {
+  //   const listener = await ngrok.connect({
+  //     addr: PORT,
+  //     authtoken: process.env.NGROK_AUTHTOKEN,
+  //   });
+  //   console.log(`Ngrok tunnel: ${listener.url()}`);
+  // }
 });
 
