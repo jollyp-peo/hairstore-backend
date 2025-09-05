@@ -1,5 +1,5 @@
 import express from "express";
-import { upload } from "../middleware/upload.js";
+import { productUpload } from "../middleware/upload.js";
 import { requireAdmin } from "../middleware/authMiddleware.js";
 import {
   createProduct,
@@ -11,8 +11,8 @@ import {
 
 const router = express.Router();
 
-router.post("/", requireAdmin, upload, createProduct);
-router.put("/:id", requireAdmin, upload, updateProduct);
+router.post("/",  productUpload, createProduct); // requireAdmin,
+router.put("/:id", requireAdmin, productUpload, updateProduct);
 router.delete("/:id", requireAdmin, deleteProduct);
 
 // Public routes

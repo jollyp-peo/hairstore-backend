@@ -2,7 +2,7 @@ import cloudinary from "../config/cloudinary.js";
 import { supabase } from "../config/supabaseClient.js";
 import slugify from "slugify";
 
-// helper to upload a file buffer to cloudinary
+//Helper: Upload buffer to Cloudinary
 const streamUpload = (fileBuffer, folder = "products") => {
 	return new Promise((resolve, reject) => {
 		const stream = cloudinary.uploader.upload_stream(
@@ -16,13 +16,22 @@ const streamUpload = (fileBuffer, folder = "products") => {
 	});
 };
 
-// helper to generate a unique slug
+// Helper: Extract Cloudinary public_id from URL
+const getPublicIdFromUrl = (url) => {
+	if (!url) return null;
+	const parts = url.split("/");
+	const fileWithExt = parts.pop();
+	const folder = parts.slice(parts.indexOf("upload") + 1).join("/"); // "products"
+	const publicId = fileWithExt.split(".")[0]; // "abc123"
+	return `${folder}/${publicId}`;
+};
+
+// Helper: Generate unique slug
 const generateUniqueSlug = async (name) => {
 	const baseSlug = slugify(name, { lower: true, strict: true });
 	let slug = baseSlug;
 	let counter = 1;
 
-	// keep checking if slug exists in supabase
 	while (true) {
 		const { data, error } = await supabase
 			.from("products")
@@ -31,7 +40,7 @@ const generateUniqueSlug = async (name) => {
 			.maybeSingle();
 
 		if (error) throw error;
-		if (!data) break; // slug is free
+		if (!data) break;
 
 		slug = `${baseSlug}-${counter++}`;
 	}
@@ -39,237 +48,308 @@ const generateUniqueSlug = async (name) => {
 	return slug;
 };
 
-// CREATE PRODUCT
+// CREATE Product
 export const createProduct = async (req, res) => {
 	try {
-		const {
-			name,
-			price,
-			original_price,
-			category,
-			featured,
-			in_stock,
-			rating,
-			reviews,
-			details,
-		} = req.body;
+		const { name, category, featured, in_stock, rating, reviews, details, variants } =
+			req.body;
 
-		// auto-generate slug
 		const slug = await generateUniqueSlug(name);
 
-		// handle cover image
-		let imageUrl = null;
-		if (req.files?.image) {
-			const uploadResult = await streamUpload(req.files.image[0].buffer);
-			imageUrl = uploadResult.secure_url;
-		}
-
-		// handle gallery images
-		let galleryUrls = [];
-		if (req.files?.gallery) {
-			for (const file of req.files.gallery) {
-				const uploadResult = await streamUpload(file.buffer);
-				galleryUrls.push(uploadResult.secure_url);
-			}
+		// cover image
+		let cover_image = null;
+		if (req.files?.image?.[0]) {
+			const uploadRes = await streamUpload(req.files.image[0].buffer);
+			cover_image = uploadRes.secure_url;
 		}
 
 		// insert product
-		const { data: product, error } = await supabase
+		const { data: product, error: productError } = await supabase
 			.from("products")
 			.insert([
 				{
 					name,
 					slug,
-					price,
-					original_price,
 					category,
 					featured,
 					in_stock,
-					rating: rating || 0,
-					reviews: reviews || 0,
-					image: imageUrl,
+					rating,
+					reviews,
+					cover_image,
 				},
 			])
 			.select()
 			.single();
 
-		if (error) throw error;
+		if (productError) throw productError;
 
-		// insert details if provided
+		// insert details
 		if (details) {
-			const detailsObj =
-				typeof details === "string" ? JSON.parse(details) : details;
-			detailsObj.images = galleryUrls; // attach gallery
-
-			const { data: productDetail, error: detailError } = await supabase
-				.from("product_details")
-				.insert([{ product_id: product.id, ...detailsObj }])
-				.select()
-				.single();
-
-			if (detailError) throw detailError;
-			product.details = productDetail;
+			const parsedDetails = typeof details === "string" ? JSON.parse(details) : details;
+			await supabase.from("product_details").insert([
+				{
+					product_id: product.id,
+					...parsedDetails,
+				},
+			]);
 		}
 
-		res.status(201).json(product);
+		// insert variants
+		if (variants) {
+			const parsedVariants = typeof variants === "string" ? JSON.parse(variants) : variants;
+
+			for (let i = 0; i < parsedVariants.length; i++) {
+				let variantImage = null;
+				if (req.files?.variants?.[i]) {
+					const uploadRes = await streamUpload(req.files.variants[i].buffer);
+					variantImage = uploadRes.secure_url;
+				}
+
+				await supabase.from("product_variants").insert([
+					{
+						product_id: product.id,
+						...parsedVariants[i],
+						image: variantImage,
+					},
+				]);
+			}
+		}
+
+		res.status(201).json({ success: true, data: product });
 	} catch (err) {
-		console.error("Create product error:", err);
-		res.status(500).json({ error: err.message });
+		console.error(err);
+		res.status(500).json({ success: false, error: err.message });
 	}
 };
 
-// // GET PRODUCTS 
-// export const getProducts = async (req, res) => {
-// 	try {
-// 		const { data, error } = await supabase
-// 			.from("products")
-// 			.select("*")
-// 			.order("created_at", { ascending: false });
-
-// 		if (error) throw error;
-// 		res.json(data);
-// 	} catch (err) {
-// 		res.status(500).json({ error: err.message });
-// 	}
-// };
-
-
-// GET PRODUCTS (with pagination, search, filter, sort)
+// GET Products (pagination, filter, sort, search)
 export const getProducts = async (req, res) => {
 	try {
-		let {
+		const {
 			page = 1,
-			limit = 10,
-			search = "",
-			category = "",
+			limit = 20,
 			sortBy = "created_at",
-			order = "desc", // "asc" | "desc"
+			order = "desc",
+			search = "",
+			category,
+			featured,
+			in_stock,
 		} = req.query;
 
-		page = parseInt(page, 10);
-		limit = parseInt(limit, 10);
 		const from = (page - 1) * limit;
-		const to = from + limit - 1;
+		const to = from + Number(limit) - 1;
 
-		// Base query
 		let query = supabase.from("products").select("*", { count: "exact" });
 
-		// Search by name
-		if (search) {
-			query = query.ilike("name", `%${search}%`);
-		}
+		if (search) query = query.ilike("name", `%${search}%`);
+		if (category) query = query.eq("category", category);
+		if (featured !== undefined) query = query.eq("featured", featured === "true");
+		if (in_stock !== undefined) query = query.eq("in_stock", in_stock === "true");
 
-		// Filter by category
-		if (category && category !== "all") query = query.eq("category", category);
-
-		// Sorting
-		if (sortBy) {
-			query = query.order(sortBy, { ascending: order === "asc" });
-		}
-
-		// Pagination
+		query = query.order(sortBy, { ascending: order === "asc" });
 		query = query.range(from, to);
 
-		// Execute
 		const { data, error, count } = await query;
 		if (error) throw error;
 
 		res.json({
-			products: data,
+			success: true,
+			data,
 			pagination: {
-				page,
-				limit,
 				total: count,
+				page: Number(page),
+				limit: Number(limit),
 				totalPages: Math.ceil(count / limit),
 			},
 		});
 	} catch (err) {
-		console.error("Get products error:", err);
-		res.status(500).json({ error: err.message });
+		console.error(err);
+		res.status(500).json({ success: false, error: err.message });
 	}
 };
 
-
-// GET PRODUCT BY ID
+// GET Single Product
 export const getProductById = async (req, res) => {
 	try {
 		const { id } = req.params;
 
-		const { data: product, error } = await supabase
+		// Fetch product
+		const { data: product, error: productError } = await supabase
 			.from("products")
-			.select("*, product_details(*)")
+			.select("*")
 			.eq("id", id)
 			.single();
+		if (productError) throw productError;
 
-		if (error) throw error;
-		res.json(product);
+		// Fetch details
+		const { data: details, error: detailsError } = await supabase
+			.from("product_details")
+			.select("*")
+			.eq("product_id", id)
+			.single();
+		if (detailsError && detailsError.code !== "PGRST116") throw detailsError;
+
+		// Fetch variants
+		const { data: variants, error: variantsError } = await supabase
+			.from("product_variants")
+			.select("*")
+			.eq("product_id", id);
+		if (variantsError) throw variantsError;
+
+		res.json({
+			success: true,
+			data: {
+				...product,
+				details: details || null,
+				variants: variants || [],
+			},
+		});
 	} catch (err) {
-		res.status(500).json({ error: err.message });
+		console.error(err);
+		res.status(500).json({ success: false, error: err.message });
 	}
 };
 
-// UPDATE PRODUCT 
+// UPDATE Product
 export const updateProduct = async (req, res) => {
 	try {
 		const { id } = req.params;
-		const { details, name, ...updates } = req.body;
+		const updates = req.body;
 
-		// If name is updated, regenerate slug
-		if (name) {
-			updates.slug = await generateUniqueSlug(name);
-		}
+		// fetch old product for image cleanup
+		const { data: oldProduct } = await supabase
+			.from("products")
+			.select("cover_image")
+			.eq("id", id)
+			.single();
 
 		// cover image update
-		if (req.files?.image) {
-			const uploadResult = await streamUpload(req.files.image[0].buffer);
-			updates.image = uploadResult.secure_url;
-		}
-
-		// gallery update
-		let galleryUrls = [];
-		if (req.files?.gallery) {
-			for (const file of req.files.gallery) {
-				const uploadResult = await streamUpload(file.buffer);
-				galleryUrls.push(uploadResult.secure_url);
+		if (req.files?.image?.[0]) {
+			if (oldProduct?.cover_image) {
+				const oldId = getPublicIdFromUrl(oldProduct.cover_image);
+				if (oldId) await cloudinary.uploader.destroy(oldId);
 			}
+			const uploadRes = await streamUpload(req.files.image[0].buffer);
+			updates.cover_image = uploadRes.secure_url;
 		}
 
-		// update product
-		const { data: updated, error } = await supabase
+		// update base product
+		const { data: product, error: productError } = await supabase
 			.from("products")
 			.update({ ...updates, updated_at: new Date() })
 			.eq("id", id)
 			.select()
 			.single();
-
-		if (error) throw error;
+		if (productError) throw productError;
 
 		// update details
-		if (details) {
-			const detailsObj =
-				typeof details === "string" ? JSON.parse(details) : details;
-			if (galleryUrls.length) detailsObj.images = galleryUrls;
-
+		if (updates.details) {
+			const parsedDetails =
+				typeof updates.details === "string" ? JSON.parse(updates.details) : updates.details;
 			await supabase
 				.from("product_details")
-				.upsert({ product_id: id, ...detailsObj, updated_at: new Date() });
+				.update({ ...parsedDetails, updated_at: new Date() })
+				.eq("product_id", id);
 		}
 
-		res.json(updated);
+		// update/add variants
+		if (updates.variants) {
+			const parsedVariants =
+				typeof updates.variants === "string" ? JSON.parse(updates.variants) : updates.variants;
+
+			// fetch old variants for cleanup
+			const { data: oldVariants } = await supabase
+				.from("product_variants")
+				.select("id,color,length,lace,image")
+				.eq("product_id", id);
+
+			for (let i = 0; i < parsedVariants.length; i++) {
+				let variantImage = null;
+				if (req.files?.variants?.[i]) {
+					// delete old image if exists
+					const old = oldVariants?.[i];
+					if (old?.image) {
+						const oldId = getPublicIdFromUrl(old.image);
+						if (oldId) await cloudinary.uploader.destroy(oldId);
+					}
+					const uploadRes = await streamUpload(req.files.variants[i].buffer);
+					variantImage = uploadRes.secure_url;
+				}
+
+				// check if variant exists
+				const existing = oldVariants?.find(
+					(v) =>
+						v.color === parsedVariants[i].color &&
+						v.length === parsedVariants[i].length &&
+						v.lace === parsedVariants[i].lace
+				);
+
+				if (existing) {
+					await supabase
+						.from("product_variants")
+						.update({
+							...parsedVariants[i],
+							image: variantImage || parsedVariants[i].image,
+							updated_at: new Date(),
+						})
+						.eq("id", existing.id);
+				} else {
+					await supabase.from("product_variants").insert([
+						{
+							product_id: id,
+							...parsedVariants[i],
+							image: variantImage,
+						},
+					]);
+				}
+			}
+		}
+
+		res.json({ success: true, data: product });
 	} catch (err) {
-		console.error("Update product error:", err);
-		res.status(500).json({ error: err.message });
+		console.error(err);
+		res.status(500).json({ success: false, error: err.message });
 	}
 };
 
-// DELETE PRODUCT 
+// DELETE Product
 export const deleteProduct = async (req, res) => {
 	try {
 		const { id } = req.params;
+
+		// fetch product + variants
+		const { data: product } = await supabase
+			.from("products")
+			.select("cover_image")
+			.eq("id", id)
+			.single();
+
+		const { data: variants } = await supabase
+			.from("product_variants")
+			.select("image")
+			.eq("product_id", id);
+
+		// delete images from Cloudinary
+		if (product?.cover_image) {
+			const publicId = getPublicIdFromUrl(product.cover_image);
+			if (publicId) await cloudinary.uploader.destroy(publicId);
+		}
+		if (variants?.length) {
+			for (const v of variants) {
+				if (v.image) {
+					const publicId = getPublicIdFromUrl(v.image);
+					if (publicId) await cloudinary.uploader.destroy(publicId);
+				}
+			}
+		}
+
+		// delete product (cascade removes details + variants)
 		const { error } = await supabase.from("products").delete().eq("id", id);
 		if (error) throw error;
-		res.json({ message: "Product deleted" });
+
+		res.json({ success: true, message: "Product and images deleted" });
 	} catch (err) {
-		res.status(500).json({ error: err.message });
+		console.error(err);
+		res.status(500).json({ success: false, error: err.message });
 	}
 };
