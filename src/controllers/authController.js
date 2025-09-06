@@ -2,6 +2,7 @@ import { supabase } from "../config/supabaseClient.js";
 import { generateAccessToken, generateRefreshToken } from "../utilis/generateToken.js";
 import bcrypt from 'bcryptjs'
 import crypto from "crypto";
+import jwt from "jsonwebtoken";
 
 // Signup
 export const signup = async (req, res) => {

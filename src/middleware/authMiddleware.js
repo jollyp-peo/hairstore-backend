@@ -22,10 +22,24 @@ export const protect = async (req, res, next) => {
 };
 
 
-//Require admin privilege
+// Require admin privilege
 export const requireAdmin = (req, res, next) => {
-  if (!req.user || req.user.role !== "admin") {
+  try {
+    // Prefer role from req.user (set by protect)
+    const role = req.user?.role;
+
+    if (role === "admin") {
+      return next();
+    }
+
+    // Fallback: try role from JWT payload if middleware stored it
+    if (req.auth && req.auth.role === "admin") {
+      return next();
+    }
+
+    return res.status(403).json({ message: "Admin access required" });
+  } catch (err) {
+    console.error("requireAdmin error:", err);
     return res.status(403).json({ message: "Admin access required" });
   }
-  next();
 };

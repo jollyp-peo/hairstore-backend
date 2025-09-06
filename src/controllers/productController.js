@@ -212,105 +212,108 @@ export const getProductById = async (req, res) => {
 
 // UPDATE Product
 export const updateProduct = async (req, res) => {
-	try {
-		const { id } = req.params;
-		const updates = req.body;
+  try {
+    const { id } = req.params;
+    const updates = req.body;
 
-		// fetch old product for image cleanup
-		const { data: oldProduct } = await supabase
-			.from("products")
-			.select("cover_image")
-			.eq("id", id)
-			.single();
+    // Separate details & variants so they don’t leak into products update
+    const { details, variants, ...productUpdates } =
+      typeof updates === "string" ? JSON.parse(updates) : updates;
 
-		// cover image update
-		if (req.files?.image?.[0]) {
-			if (oldProduct?.cover_image) {
-				const oldId = getPublicIdFromUrl(oldProduct.cover_image);
-				if (oldId) await cloudinary.uploader.destroy(oldId);
-			}
-			const uploadRes = await streamUpload(req.files.image[0].buffer);
-			updates.cover_image = uploadRes.secure_url;
-		}
+    // fetch old product for image cleanup
+    const { data: oldProduct } = await supabase
+      .from("products")
+      .select("cover_image")
+      .eq("id", id)
+      .single();
 
-		// update base product
-		const { data: product, error: productError } = await supabase
-			.from("products")
-			.update({ ...updates, updated_at: new Date() })
-			.eq("id", id)
-			.select()
-			.single();
-		if (productError) throw productError;
+    // cover image update
+    if (req.files?.image?.[0]) {
+      if (oldProduct?.cover_image) {
+        const oldId = getPublicIdFromUrl(oldProduct.cover_image);
+        if (oldId) await cloudinary.uploader.destroy(oldId);
+      }
+      const uploadRes = await streamUpload(req.files.image[0].buffer);
+      productUpdates.cover_image = uploadRes.secure_url;
+    }
 
-		// update details
-		if (updates.details) {
-			const parsedDetails =
-				typeof updates.details === "string" ? JSON.parse(updates.details) : updates.details;
-			await supabase
-				.from("product_details")
-				.update({ ...parsedDetails, updated_at: new Date() })
-				.eq("product_id", id);
-		}
+    // update base product only
+    const { data: product, error: productError } = await supabase
+      .from("products")
+      .update({ ...productUpdates, updated_at: new Date() })
+      .eq("id", id)
+      .select()
+      .single();
+    if (productError) throw productError;
 
-		// update/add variants
-		if (updates.variants) {
-			const parsedVariants =
-				typeof updates.variants === "string" ? JSON.parse(updates.variants) : updates.variants;
+    // update details
+    if (details) {
+      const parsedDetails =
+        typeof details === "string" ? JSON.parse(details) : details;
+      await supabase
+        .from("product_details")
+        .update({ ...parsedDetails, updated_at: new Date() })
+        .eq("product_id", id);
+    }
 
-			// fetch old variants for cleanup
-			const { data: oldVariants } = await supabase
-				.from("product_variants")
-				.select("id,color,length,lace,image")
-				.eq("product_id", id);
+    // update/add variants
+    if (variants) {
+      const parsedVariants =
+        typeof variants === "string" ? JSON.parse(variants) : variants;
 
-			for (let i = 0; i < parsedVariants.length; i++) {
-				let variantImage = null;
-				if (req.files?.variants?.[i]) {
-					// delete old image if exists
-					const old = oldVariants?.[i];
-					if (old?.image) {
-						const oldId = getPublicIdFromUrl(old.image);
-						if (oldId) await cloudinary.uploader.destroy(oldId);
-					}
-					const uploadRes = await streamUpload(req.files.variants[i].buffer);
-					variantImage = uploadRes.secure_url;
-				}
+      // fetch old variants for cleanup
+      const { data: oldVariants } = await supabase
+        .from("product_variants")
+        .select("id,color,length,lace,image")
+        .eq("product_id", id);
 
-				// check if variant exists
-				const existing = oldVariants?.find(
-					(v) =>
-						v.color === parsedVariants[i].color &&
-						v.length === parsedVariants[i].length &&
-						v.lace === parsedVariants[i].lace
-				);
+      for (let i = 0; i < parsedVariants.length; i++) {
+        let variantImage = null;
+        if (req.files?.variants?.[i]) {
+          const old = oldVariants?.[i];
+          if (old?.image) {
+            const oldId = getPublicIdFromUrl(old.image);
+            if (oldId) await cloudinary.uploader.destroy(oldId);
+          }
+          const uploadRes = await streamUpload(req.files.variants[i].buffer);
+          variantImage = uploadRes.secure_url;
+        }
 
-				if (existing) {
-					await supabase
-						.from("product_variants")
-						.update({
-							...parsedVariants[i],
-							image: variantImage || parsedVariants[i].image,
-							updated_at: new Date(),
-						})
-						.eq("id", existing.id);
-				} else {
-					await supabase.from("product_variants").insert([
-						{
-							product_id: id,
-							...parsedVariants[i],
-							image: variantImage,
-						},
-					]);
-				}
-			}
-		}
+        const existing = oldVariants?.find(
+          (v) =>
+            v.color === parsedVariants[i].color &&
+            v.length === parsedVariants[i].length &&
+            v.lace === parsedVariants[i].lace
+        );
 
-		res.json({ success: true, data: product });
-	} catch (err) {
-		console.error(err);
-		res.status(500).json({ success: false, error: err.message });
-	}
+        if (existing) {
+          await supabase
+            .from("product_variants")
+            .update({
+              ...parsedVariants[i],
+              image: variantImage || parsedVariants[i].image,
+              updated_at: new Date(),
+            })
+            .eq("id", existing.id);
+        } else {
+          await supabase.from("product_variants").insert([
+            {
+              product_id: id,
+              ...parsedVariants[i],
+              image: variantImage,
+            },
+          ]);
+        }
+      }
+    }
+
+    res.json({ success: true, data: product });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: err.message });
+  }
 };
+
 
 // DELETE Product
 export const deleteProduct = async (req, res) => {
