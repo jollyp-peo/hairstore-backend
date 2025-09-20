@@ -15,5 +15,5 @@ export const upload = multer({ storage, fileFilter });
 // Define accepted fields (cover + variants)
 export const productUpload = upload.fields([
 	{ name: "image", maxCount: 1 },     // cover image
-	{ name: "variants", maxCount: 10 }, // multiple variant images
+	{ name: "variants", maxCount: 20 }, // multiple variant images
 ]);
