@@ -1,5 +1,5 @@
 import { supabase } from "../config/supabaseClient.js";
-import { generateAccessToken, generateRefreshToken } from "../utilis/generateToken.js";
+import { generateAccessToken, generateRefreshToken } from "../utils/generateToken.js";
 import bcrypt from 'bcryptjs'
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
@@ -166,11 +166,21 @@ export const logout = async (req, res) => {
       return res.status(400).json({ message: "Refresh token required" });
     }
 
-    // Only delete session belonging to this logged-in user
+    // Find user_id linked to this refresh token
+    const { data: session } = await supabase
+      .from("user_sessions")
+      .select("user_id")
+      .eq("refresh_token", refreshToken)
+      .maybeSingle();
+
+    if (!session) {
+      return res.status(404).json({ message: "Session not found or already logged out" });
+    }
+
     await supabase
       .from("user_sessions")
       .delete()
-      .eq("user_id", req.user.id)
+      .eq("user_id", session.user_id)
       .eq("refresh_token", refreshToken);
 
     res.json({ message: "Logged out successfully" });
@@ -179,6 +189,7 @@ export const logout = async (req, res) => {
     res.status(500).json({ message: "Logout failed" });
   }
 };
+
 
 
 

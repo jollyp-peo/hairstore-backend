@@ -30,6 +30,7 @@
     "gridfs-stream": "^1.1.1",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
+    "monnify-nodejs-lib": "^1.0.2",
     "multer": "^2.0.2",
     "nodemailer": "^7.0.5",
     "slugify": "^1.6.6",

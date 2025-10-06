@@ -1,20 +1,26 @@
-const userEmail ='erubizzltd@gmail.com';
-const username = userEmail.split('@');
-console.log(username);
+import fetch from "node-fetch";
 
-const arr = ['mon', 'tue', 'wed', 'thur', 'fri', 'sat', 'sun'];
-for(let i = 0; i < arr.length; i++){
-  const index = arr[i];
-  const cap = index.charAt([0]);
-  const result = cap.toUpperCase() + index.slice(1);
-  console.log(result);
-}
+const API_KEY = "MK_TEST_RY8TA4TV4L";
+const SECRET_KEY = "B8SJ2QVD6SMV17VN0AD15WNHE5659HSQ";
+const BASE_URL = "https://sandbox.monnify.com/api/v1";
 
-const str = 'monday'
-const index = str.charAt(0).toUpperCase() + str.slice(1)
-console.log(index);
+const getAccessToken = async () => {
+  try {
+    const res = await fetch(`${BASE_URL}/auth/login`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Basic ${Buffer.from(`${API_KEY}:${SECRET_KEY}`).toString("base64")}`,
+        "Content-Type": "application/json",
+      },
+    });
 
-function capWord(word){
-  return word.charAt(0).toUpperCase() + word.slice(1);
-}
-console.log(capWord('possible'));
+    const data = await res.json();
+    if (!res.ok) throw data;
+
+    console.log("Access token:", data.responseBody.accessToken);
+  } catch (err) {
+    console.error("Login failed:", err);
+  }
+};
+
+getAccessToken();

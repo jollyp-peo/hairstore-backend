@@ -1,20 +1,25 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { protect, requireAdmin } from '../middleware/authMiddleware.js';
-import { initializePayment, verifyPayment, handleWebhook } from '../controllers/paymentController.js'
+import { initializePayment, verifyPayment, handleWebhook } from '../controllers/paymentController.js';
 
 const router = express.Router();
 
+// Limit payment initialization requests
 const initLimiter = rateLimit({
-  windowMs: 10 * 60 * 1000,
+  windowMs: 10 * 60 * 1000, // 10 minutes
   max: 20,
   standardHeaders: true,
 });
 
-router.post('/paystack/initialize', protect, initLimiter, initializePayment);
-router.get('/paystack/verify', protect,   verifyPayment); //add protect later
+// Initialize payment (user must be authenticated)
+router.post('/init', protect, initLimiter, initializePayment);
 
-// Webhook must NOT be behind auth
-router.post('/paystack/webhook', handleWebhook);
+// Verify payment (user must be authenticated)
+router.get('/verify', protect, verifyPayment);
+// router.get('/verify', verifyPayment);
+
+// Monnify Webhook (must NOT be behind auth)
+router.post('/webhook', handleWebhook);
 
 export default router;

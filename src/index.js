@@ -91,18 +91,24 @@ app.use((req, res, next) => {
   next();
 });
 
+// CSP Middleware
+app.use((req, res, next) => {
+  const csp = `
+    default-src 'self';
+    script-src 'self' https://sandbox.sdk.monnify.com https://sdk.monnify.com https://code.jquery.com https://cdn.jsdelivr.net;
+    connect-src 'self' https://sandbox.sdk.monnify.com https://sandbox.monnify.com https://api.monnify.com https://sdk.monnify.com;
+    style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://sandbox.sdk.monnify.com https://sdk.monnify.com;
+    img-src 'self' data: https://sandbox.sdk.monnify.com https://sdk.monnify.com;
+    font-src 'self' https://cdn.jsdelivr.net;
+  `.replace(/\n/g, ''); // remove newlines
+
+  res.setHeader("Content-Security-Policy", csp);
+  next();
+});
+
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
-
-  // Start ngrok tunnel
-  // if (process.env.NODE_ENV !== 'production') {
-  //   const listener = await ngrok.connect({
-  //     addr: PORT,
-  //     authtoken: process.env.NGROK_AUTHTOKEN,
-  //   });
-  //   console.log(`Ngrok tunnel: ${listener.url()}`);
-  // }
 });
 
