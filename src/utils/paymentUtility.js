@@ -96,7 +96,7 @@ export const processPayment = async (payment, isPaid) => {
       .insert({
         user_id: payment.user_id,
         payment_reference: payment.reference,
-        amount: payment.amount / 100,
+        amount: payment.amount,
         currency: payment.currency,
         status: "processing",
         created_at: new Date().toISOString(),

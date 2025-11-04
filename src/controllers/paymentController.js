@@ -26,7 +26,7 @@ export const initializePayment = async (req, res) => {
 
     const reference = generateReference();
 
-    // Store payment in DB as initialized
+    // Store payment in DB (amount in kobo)
     const { error: insertErr } = await supabase.from("payments").insert({
       user_id: user.id,
       reference,
@@ -55,8 +55,9 @@ export const initializePayment = async (req, res) => {
       customerName: user.name || meta?.name || "Customer",
       paymentReference: reference,
       paymentDescription: meta?.description || "Order Payment",
-      redirectUrl: `${process.env.FRONTEND_URL}/payment/callback?reference=${reference}&autoVerify=true`,
+      redirectUrl: `${process.env.FRONTEND_URL}/payment/callback?paymentReference=${reference}&autoVerify=true`,
       paymentMethods: ["CARD", "ACCOUNT_TRANSFER"], // Optional: specify allowed methods
+      incomeSplitConfig: [], // Required field, empty array if no splits
     };
 
     const monnifyRes = await fetch(`${baseUrl}/merchant/transactions/init-transaction`, {
@@ -97,27 +98,15 @@ export const initializePayment = async (req, res) => {
 // Verify payment manually
 export const verifyPayment = async (req, res) => {
   try {
+    const { reference } = req.query;
     const user = req.user;
-
-    // Check user authentication
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized. User not found.",
-      });
-    }
-
-    // Get reference from query and clean it
-    let { reference } = req.query;
+    
     if (!reference) {
-      return res.status(400).json({
-        success: false,
-        message: "Reference required",
+      return res.status(400).json({ 
+        success: false, 
+        message: "Reference required" 
       });
     }
-
-    // Strip any extra query params
-    reference = reference.split("?")[0];
 
     // Get payment from DB
     const { data: payment, error: fetchErr } = await supabase
@@ -128,20 +117,18 @@ export const verifyPayment = async (req, res) => {
       .single();
 
     if (fetchErr || !payment) {
-      return res.status(404).json({
-        success: false,
-        message: "Payment not found",
+      return res.status(404).json({ 
+        success: false, 
+        message: "Payment not found" 
       });
     }
 
     // If already processed, return status
     if (payment.status === "paid") {
-      return res.json({
-        success: true,
+      return res.json({ 
+        success: true, 
         paid: true,
-        status: "PAID",
-        message: "Payment already processed",
-        amount: payment.amount, // amount in naira
+        message: "Payment already processed" 
       });
     }
 
@@ -151,45 +138,43 @@ export const verifyPayment = async (req, res) => {
       `${baseUrl}/merchant/transactions/query?paymentReference=${reference}`,
       {
         method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
+        headers: { 
+          Authorization: `Bearer ${token}`, 
+          "Content-Type": "application/json" 
         },
       }
     );
 
     const monnifyData = await monnifyRes.json();
-
+    
     if (!monnifyRes.ok || !monnifyData.requestSuccessful) {
       console.error("[VERIFY] Monnify error:", monnifyData);
       throw new Error(monnifyData.responseMessage || "Failed to verify payment");
     }
 
     const isPaid = monnifyData.responseBody.paymentStatus === "PAID";
-
+    
     // Process payment if paid
-    if (isPaid) {
+    if (isPaid || payment.status !== "paid") {
       await processPayment(payment, isPaid);
     }
 
     console.log(`[VERIFY] Payment ${reference}: ${isPaid ? "PAID" : "NOT PAID"}`);
 
-    return res.json({
-      success: true,
+    return res.json({ 
+      success: true, 
       paid: isPaid,
       status: monnifyData.responseBody.paymentStatus,
-      amount: monnifyData.responseBody.amountPaid / 100, // convert kobo to naira
-      message: isPaid ? "Payment successful" : "Payment not completed",
+      amount: monnifyData.responseBody.amountPaid,
     });
   } catch (err) {
     console.error("[VERIFY] Error:", err.message);
-    return res.status(500).json({
-      success: false,
-      message: err.message || "Server error verifying payment",
+    return res.status(500).json({ 
+      success: false, 
+      message: err.message || "Server error verifying payment" 
     });
   }
 };
-
 
 // Webhook: Monnify calls this on payment events
 export const handleWebhook = async (req, res) => {

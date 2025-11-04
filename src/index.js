@@ -11,6 +11,7 @@ import profileRoute from './routes/profileRoute.js'
 import addressRoutes from "./routes/addressRoutes.js";
 import { rawBodyBuffer } from './middleware/rawBody.js';
 import productRoutes from "./routes/productRoutes.js";
+import orderRoutes from "./routes/orderRoutes.js";
 // import ngrok from '@ngrok/ngrok';
 
 
@@ -66,6 +67,7 @@ app.use('/api/payments', paymentRoute);
 app.use('/api/profile', profileRoute);
 app.use("/api/addresses", addressRoutes);
 app.use("/api/products", productRoutes);
+app.use("/api/orders", orderRoutes);
 
 
 

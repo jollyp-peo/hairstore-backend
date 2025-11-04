@@ -20,6 +20,6 @@ router.get('/verify', protect, verifyPayment);
 // router.get('/verify', verifyPayment);
 
 // Monnify Webhook (must NOT be behind auth)
-router.post('/webhook', handleWebhook);
+router.post('/monnify/webhook', handleWebhook);
 
 export default router;
