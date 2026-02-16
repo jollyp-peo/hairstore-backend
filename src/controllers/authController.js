@@ -56,12 +56,36 @@ export const signup = async (req, res) => {
       expires_at: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7), // 7 days
     });
 
+    // for dev testing only, return tokens in response body
+
+    // res.status(201).json({
+    //   message: "Signup successful",
+    //   user,
+    //   accessToken,
+    //   refreshToken,
+    // });
+
+    // prodction
+    // Set cookies
+    res.cookie("accessToken", accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "Strict",
+      maxAge: 15 * 60 * 1000, // 15 min
+    });
+
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "Strict",
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+
     res.status(201).json({
       message: "Signup successful",
       user,
-      accessToken,
-      refreshToken,
     });
+
   } catch (err) {
     console.error("Signup error:", err);
     res.status(500).json({ message: "Server error" });
@@ -75,10 +99,12 @@ export const login = async (req, res) => {
   try {
     const { identifier, password } = req.body;
 
+    const normalizedIdentifier = identifier.toLowerCase().trim();
+
     const { data: user } = await supabase
       .from("users")
       .select("*")
-      .or(`email.eq.${identifier.toLowerCase()},username.eq.${identifier.toLowerCase()}`)
+      .or(`email.eq.${normalizedIdentifier},username.eq.${normalizedIdentifier}`)
       .maybeSingle();
 
     if (!user) return res.status(400).json({ message: "Invalid credentials" });
@@ -97,12 +123,33 @@ export const login = async (req, res) => {
       expires_at: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7),
     });
 
+    // res.json({
+    //   message: "Login successful",
+    //   user,
+    //   accessToken,
+    //   refreshToken,
+    // });
+
+    // prodction
+    res.cookie("accessToken", accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "Strict",
+      maxAge: 15 * 60 * 1000,
+    });
+
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "Strict",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
     res.json({
       message: "Login successful",
       user,
-      accessToken,
-      refreshToken,
     });
+
   } catch (err) {
     res.status(500).json({ message: "Server error" });
   }
@@ -114,7 +161,8 @@ export const login = async (req, res) => {
 // refresh token 
 export const refreshToken = async (req, res) => {
   try {
-    const { token } = req.body;
+    const token = req.cookies.refreshToken;
+
     if (!token) return res.status(401).json({ message: "Refresh token required" });
 
     const decoded = jwt.verify(token, REFRESH_TOKEN_SECRET);
@@ -146,11 +194,22 @@ export const refreshToken = async (req, res) => {
     await supabase.from("user_sessions")
       .update({ refresh_token: newRefreshToken, updated_at: new Date() })
       .eq("id", session.id);
-
-    res.json({
-      accessToken: newAccessToken,
-      refreshToken: newRefreshToken,
+    
+    res.cookie("accessToken", newAccessToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "None",
+      maxAge: 15 * 60 * 1000,
     });
+
+    res.cookie("refreshToken", newRefreshToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "None",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    res.json({ message: "Refreshed" });
   } catch (err) {
     return res.status(403).json({ message: "Invalid or expired refresh token" });
   }
@@ -160,37 +219,23 @@ export const refreshToken = async (req, res) => {
 // logout (secure)
 export const logout = async (req, res) => {
   try {
-    const refreshToken = req.body.refreshToken || req.headers["x-refresh-token"];
-
-    if (!refreshToken) {
-      return res.status(400).json({ message: "Refresh token required" });
-    }
-
-    // Find user_id linked to this refresh token
-    const { data: session } = await supabase
-      .from("user_sessions")
-      .select("user_id")
-      .eq("refresh_token", refreshToken)
-      .maybeSingle();
-
-    if (!session) {
-      return res.status(404).json({ message: "Session not found or already logged out" });
-    }
+    const token = req.cookies.refreshToken;
+    if (!token) return res.status(400).json({ message: "No session found" });
 
     await supabase
       .from("user_sessions")
       .delete()
-      .eq("user_id", session.user_id)
-      .eq("refresh_token", refreshToken);
+      .eq("refresh_token", token);
+
+    res.clearCookie("accessToken");
+    res.clearCookie("refreshToken");
 
     res.json({ message: "Logged out successfully" });
+
   } catch (err) {
-    console.error("Logout error:", err);
     res.status(500).json({ message: "Logout failed" });
   }
 };
-
-
 
 
 
@@ -268,8 +313,15 @@ export const resetPassword = async (req, res) => {
   }
 };
 
+export const getMe = async (req, res) => {
+  res.json({ user: req.user });
+};
 
+
+export const getCSRFToken = (req, res) => {
+  res.json({ csrfToken: req.csrfToken() });
+};
 
 export const getAllUsers = (req, res) => {
-	console.log("users");
+  console.log("users");
 };

@@ -6,17 +6,24 @@ import {
   logout,
   requestPasswordReset,
   resetPassword,
-  getAllUsers
+  getAllUsers,
+  getMe,
+  getCSRFToken
 } from '../controllers/authController.js';
 import { protect, requireAdmin } from '../middleware/authMiddleware.js';
+import { authLimiter } from "../middleware/rateLimiter.js";
+import { csrfProtection}  from '../middleware/csrfMiddleware.js';
 
 const router = express.Router();
 
 // Auth
-router.post('/signup', signup);
-router.post('/login', login);
-router.post('/refresh', refreshToken);   // refresh with token in body
-router.post('/logout', logout);          // expects { refreshToken } in body
+router.post('/signup', authLimiter, csrfProtection, signup);
+router.post('/login', authLimiter, csrfProtection, login);
+router.post('/refresh', csrfProtection, refreshToken);  
+router.post('/logout',csrfProtection,  logout);        
+router.get("/me", protect, getMe); 
+router.get("/csrf-token", csrfProtection, getCSRFToken); 
+
 
 // Password reset
 router.post('/password-reset/request', requestPasswordReset);

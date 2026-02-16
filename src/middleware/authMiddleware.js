@@ -5,21 +5,26 @@ const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET || "access_secret";
 
 export const protect = async (req, res, next) => {
   try {
-    const token = req.headers.authorization?.split(" ")[1];
-    if (!token) return res.status(401).json({ message: "Access token required" });
+    const token = req.cookies.accessToken;
+    if (!token) return res.status(401).json({ message: "Unauthorized" });
 
-    const decoded = jwt.verify(token, ACCESS_TOKEN_SECRET);
+    const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
 
-    const { data: user } = await supabase.from("users").select("*").eq("id", decoded.id).single();
+    const { data: user } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", decoded.id)
+      .single();
 
     if (!user) return res.status(401).json({ message: "User not found" });
 
     req.user = user;
     next();
   } catch (err) {
-    res.status(401).json({ message: "Authentication failed" });
+    return res.status(401).json({ message: "Authentication failed" });
   }
 };
+
 
 
 // Require admin privilege

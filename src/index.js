@@ -5,11 +5,13 @@ import express from 'express';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import helmet from 'helmet';
+
 import authRoutes from './routes/authRoute.js';
 import paymentRoute from './routes/paymentRoute.js'
 import profileRoute from './routes/profileRoute.js'
 import addressRoutes from "./routes/addressRoutes.js";
 import { rawBodyBuffer } from './middleware/rawBody.js';
+import { globalLimiter } from "./middleware/rateLimiter.js";
 import productRoutes from "./routes/productRoutes.js";
 import orderRoutes from "./routes/orderRoutes.js";
 // import ngrok from '@ngrok/ngrok';
@@ -19,6 +21,7 @@ const app = express();
 
 // Trust proxy for production deployment
 app.set('trust proxy', 1);
+
 
 // Security middleware
 app.use(helmet({
@@ -47,7 +50,8 @@ app.use(cors({
       callback(new Error('CORS not allowed'));
     }
   },
-  credentials: true
+  credentials: true,
+  methods: ["GET","POST","PUT","DELETE"],
 }));
 
 // Raw body parser for webhooks (must come before express.json())
@@ -60,6 +64,17 @@ app.use(express.json({ verify: rawBodyBuffer }));
 // app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+
+// Rate limiting
+app.use(globalLimiter);
+
+
+// Ngrok setup for local testing (uncomment if needed)
+// (async () => {
+//   const url = await ngrok.connect(PORT);
+//   console.log(`Ngrok URL: ${url}`);
+// })();
+
 
 // routes
 app.use('/api/auth', authRoutes);
@@ -107,6 +122,7 @@ app.use((req, res, next) => {
   res.setHeader("Content-Security-Policy", csp);
   next();
 });
+
 
 
 const PORT = process.env.PORT || 5000;
